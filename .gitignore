@@ -1,0 +1,26 @@
+# API Keys & Secrets
+.env
+*.env
+ai-service/.env
+backend/.env
+frontend/.env
+
+# Big AI Models (InsightFace / ONNX)
+*.onnx
+ai-service/inswapper_128.onnx
+
+# Python Virtual Environments & Cache
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Node Modules & Builds
+node_modules/
+dist/
+build/
+.cache/
+
+# Local Output Caricatures & Lead Databases
+backend/outputs/*
+!backend/outputs/.gitkeep

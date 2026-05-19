@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+python-multipart
+pydantic
+opencv-python-headless
+numpy
+insightface
+mediapipe
+requests
+diffusers
+transformers
+accelerate
+torch
+torchvision
