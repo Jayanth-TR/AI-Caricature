@@ -4,8 +4,7 @@ python-multipart
 pydantic
 opencv-python-headless
 python-dotenv
-numpy
-insightface
+numpy==1.26.4
 mediapipe
 requests
 diffusers
@@ -13,3 +12,7 @@ transformers
 accelerate
 torch
 torchvision
+onnxruntime==1.17.3
+insightface==0.7.3
+rembg
+requests
