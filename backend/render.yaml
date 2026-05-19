@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: ai-caricature-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start

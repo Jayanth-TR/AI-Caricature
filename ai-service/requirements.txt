@@ -3,6 +3,7 @@ uvicorn
 python-multipart
 pydantic
 opencv-python-headless
+python-dotenv
 numpy
 insightface
 mediapipe

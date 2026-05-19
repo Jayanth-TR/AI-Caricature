@@ -6,36 +6,52 @@ const FormData = require("form-data");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+require("dotenv").config();
 
 const cloudinary = require("cloudinary").v2;
 
-cloudinary.config({
-    cloud_name: "df2fypohw",
-    api_key: "595361815927268",
-    api_secret: "MNqcMnL52L4tHTGrG9uX6Wcyf4k"
-});
-
 const app = express();
 
-// Ensure local outputs folder exists
-const outputsDir = path.join(__dirname, "outputs");
-if (!fs.existsSync(outputsDir)) {
-    fs.mkdirSync(outputsDir, { recursive: true });
-}
+// ----------------------------------------------------
+// CLOUDINARY CONFIG
+// ----------------------------------------------------
+
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+// ----------------------------------------------------
+// ENV VARIABLES
+// ----------------------------------------------------
 
 const PORT = process.env.PORT || 3005;
+
 const AI_SERVICE_URL =
     process.env.AI_SERVICE_URL || "http://localhost:8001";
 
+const FRONTEND_URL =
+    process.env.FRONTEND_URL || "*";
+
+// ----------------------------------------------------
+// OUTPUT DIRECTORY
+// ----------------------------------------------------
+
+const outputsDir = path.join(__dirname, "outputs");
+
+if (!fs.existsSync(outputsDir)) {
+    fs.mkdirSync(outputsDir, { recursive: true });
+}
 
 // ----------------------------------------------------
 // MIDDLEWARE
 // ----------------------------------------------------
 
-app.use(cors());
-
-// Serve outputs static folder
-app.use("/outputs", express.static(path.join(__dirname, "outputs")));
+app.use(cors({
+    origin: FRONTEND_URL,
+    credentials: true
+}));
 
 app.use(express.json({
     limit: "15mb"
@@ -46,6 +62,10 @@ app.use(express.urlencoded({
     limit: "15mb"
 }));
 
+app.use(
+    "/outputs",
+    express.static(path.join(__dirname, "outputs"))
+);
 
 // ----------------------------------------------------
 // MULTER CONFIG
@@ -71,7 +91,9 @@ const upload = multer({
 
         if (!allowedMimeTypes.includes(file.mimetype)) {
             return cb(
-                new Error("Only JPEG, PNG and WEBP images are allowed")
+                new Error(
+                    "Only JPEG, PNG and WEBP images are allowed"
+                )
             );
         }
 
@@ -79,6 +101,61 @@ const upload = multer({
     }
 });
 
+// ----------------------------------------------------
+// UTILITIES
+// ----------------------------------------------------
+
+function getLocalIpAddress() {
+
+    const interfaces = os.networkInterfaces();
+
+    for (const name of Object.keys(interfaces)) {
+
+        for (const iface of interfaces[name]) {
+
+            if (
+                iface.family === "IPv4" &&
+                !iface.internal
+            ) {
+                return iface.address;
+            }
+        }
+    }
+
+    return "localhost";
+}
+
+const uploadToCloudinary = (buffer) => {
+
+    return new Promise((resolve, reject) => {
+
+        const uploadStream =
+            cloudinary.uploader.upload_stream(
+                {
+                    folder: "caricatures",
+                    resource_type: "image"
+                },
+
+                (error, result) => {
+
+                    if (error) {
+                        console.error(
+                            "Cloudinary upload error:",
+                            error
+                        );
+
+                        reject(error);
+
+                    } else {
+
+                        resolve(result);
+                    }
+                }
+            );
+
+        uploadStream.end(buffer);
+    });
+};
 
 // ----------------------------------------------------
 // HEALTH CHECK
@@ -97,6 +174,7 @@ app.get("/", async (req, res) => {
 
         return res.json({
             status: "running",
+            backend: true,
             ai_service: aiHealth.data
         });
 
@@ -108,27 +186,6 @@ app.get("/", async (req, res) => {
         });
     }
 });
-
-
-const uploadToCloudinary = (buffer) => {
-    return new Promise((resolve, reject) => {
-        const uploadStream = cloudinary.uploader.upload_stream(
-            {
-                folder: "caricatures",
-                resource_type: "image"
-            },
-            (error, result) => {
-                if (error) {
-                    console.error("Cloudinary upload error:", error);
-                    reject(error);
-                } else {
-                    resolve(result);
-                }
-            }
-        );
-        uploadStream.end(buffer);
-    });
-};
 
 // ----------------------------------------------------
 // MAIN GENERATE API
@@ -142,10 +199,6 @@ app.post(
 
         try {
 
-            // --------------------------------
-            // VALIDATION
-            // --------------------------------
-
             if (!req.file) {
 
                 return res.status(400).json({
@@ -158,17 +211,6 @@ app.post(
             console.log("NEW IMAGE REQUEST");
             console.log("==================================");
 
-            console.log("Filename:", req.file.originalname);
-            console.log("MimeType:", req.file.mimetype);
-            console.log(
-                "Size:",
-                `${(req.file.size / 1024).toFixed(2)} KB`
-            );
-
-            // --------------------------------
-            // CREATE FORM DATA
-            // --------------------------------
-
             const formData = new FormData();
 
             formData.append(
@@ -180,33 +222,25 @@ app.post(
                 }
             );
 
-            if (req.body.prompt) {
-                formData.append("prompt", req.body.prompt);
-            } else {
-                formData.append("prompt", "Default prompt");
-            }
+            formData.append(
+                "prompt",
+                req.body.prompt || "Default prompt"
+            );
 
-            if (req.body.gender) {
-                formData.append("gender", req.body.gender);
-            } else {
-                formData.append("gender", "male");
-            }
+            formData.append(
+                "gender",
+                req.body.gender || "male"
+            );
 
-            if (req.body.wears_glasses !== undefined) {
-                formData.append("wears_glasses", String(req.body.wears_glasses));
-            } else {
-                formData.append("wears_glasses", "false");
-            }
+            formData.append(
+                "wears_glasses",
+                String(req.body.wears_glasses || false)
+            );
 
-            if (req.body.hairStyle) {
-                formData.append("hair_style", req.body.hairStyle);
-            } else {
-                formData.append("hair_style", "default");
-            }
-
-            // --------------------------------
-            // SEND TO PYTHON AI SERVICE
-            // --------------------------------
+            formData.append(
+                "hair_style",
+                req.body.hairStyle || "default"
+            );
 
             console.log("Sending image to AI service...");
 
@@ -220,108 +254,126 @@ app.post(
 
                     responseType: "arraybuffer",
 
-                    timeout: 120000 // 2 mins
+                    timeout: 120000
                 }
             );
 
-            console.log("AI image generated successfully");
+            console.log(
+                "AI image generated successfully"
+            );
 
             // --------------------------------
-            // SAVE LOCAL COPY & LOG METADATA
+            // SAVE IMAGE
             // --------------------------------
+
             const timestamp = Date.now();
-            const gender = req.body.gender || "male";
-            const userName = req.body.name || "anonymous";
-            const userCompany = req.body.company || "unknown";
-            
-            // Clean names for safe files
-            const nameSanitized = userName.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
-            const companySanitized = userCompany.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
-            
-            const outputFilename = `caricature_${nameSanitized}_${companySanitized}_${timestamp}.png`;
-            const outputPath = path.join(outputsDir, outputFilename);
-            fs.writeFileSync(outputPath, aiResponse.data);
-            console.log(`Saved output locally to ${outputPath}`);
 
-            // Upload generated caricature to Cloudinary
+            const userName =
+                req.body.name || "anonymous";
+
+            const userCompany =
+                req.body.company || "unknown";
+
+            const safeName =
+                userName
+                    .replace(/[^a-zA-Z0-9]/g, "_")
+                    .toLowerCase();
+
+            const safeCompany =
+                userCompany
+                    .replace(/[^a-zA-Z0-9]/g, "_")
+                    .toLowerCase();
+
+            const outputFilename =
+                `caricature_${safeName}_${safeCompany}_${timestamp}.png`;
+
+            const outputPath =
+                path.join(outputsDir, outputFilename);
+
+            fs.writeFileSync(
+                outputPath,
+                aiResponse.data
+            );
+
+            // --------------------------------
+            // CLOUDINARY
+            // --------------------------------
+
             let cloudinaryUrl = "";
+
             try {
-                console.log("Uploading generated image to Cloudinary...");
-                const cloudResult = await uploadToCloudinary(aiResponse.data);
-                cloudinaryUrl = cloudResult.secure_url;
-                console.log(`Cloudinary upload successful: ${cloudinaryUrl}`);
-            } catch (err) {
-                console.error("Failed to upload to Cloudinary:", err);
+
+                const cloudResult =
+                    await uploadToCloudinary(
+                        aiResponse.data
+                    );
+
+                cloudinaryUrl =
+                    cloudResult.secure_url;
+
+            } catch (error) {
+
+                console.error(
+                    "Cloudinary upload failed:",
+                    error.message
+                );
             }
 
-            // Append metadata to central leads CSV database with Cloudinary URL
-            const csvPath = path.join(outputsDir, "leads.csv");
-            const csvRow = `"${new Date(timestamp).toLocaleString()}","${userName.replace(/"/g, '""')}","${userCompany.replace(/"/g, '""')}","${outputFilename}","${cloudinaryUrl}"\n`;
-            
+            // --------------------------------
+            // CSV LOGGING
+            // --------------------------------
+
+            const csvPath =
+                path.join(outputsDir, "leads.csv");
+
+            const csvRow =
+                `"${new Date(timestamp).toLocaleString()}","${userName.replace(/"/g, '""')}","${userCompany.replace(/"/g, '""')}","${outputFilename}","${cloudinaryUrl}"\n`;
+
             if (!fs.existsSync(csvPath)) {
-                fs.writeFileSync(csvPath, "Timestamp,Name,Company,ImageFilename,CloudinaryUrl\n");
+
+                fs.writeFileSync(
+                    csvPath,
+                    "Timestamp,Name,Company,ImageFilename,CloudinaryUrl\n"
+                );
             }
+
             fs.appendFileSync(csvPath, csvRow);
-            console.log(`Successfully appended lead details to CSV database.`);
 
             // --------------------------------
-            // CONVERT TO BASE64
+            // BASE64
             // --------------------------------
 
-            const base64Image = Buffer
-                .from(aiResponse.data)
-                .toString("base64");
+            const base64Image =
+                Buffer
+                    .from(aiResponse.data)
+                    .toString("base64");
 
             const mimeType =
                 aiResponse.headers["content-type"] ||
                 "image/png";
 
-            // --------------------------------
-            // RETURN RESPONSE
-            // --------------------------------
-
             return res.json({
                 success: true,
+
                 imageUrl:
                     `data:${mimeType};base64,${base64Image}`,
-                cloudinaryUrl: cloudinaryUrl
+
+                cloudinaryUrl
             });
 
         } catch (error) {
 
-            console.error("\n==================================");
+            console.error(
+                "\n=================================="
+            );
+
             console.error("BACKEND ERROR");
-            console.error("==================================");
+
+            console.error(
+                "=================================="
+            );
 
             console.error(error.message);
-
-            // --------------------------------
-            // AI SERVICE ERROR
-            // --------------------------------
-
-            if (error.response) {
-
-                console.error(
-                    "AI SERVICE RESPONSE:",
-                    error.response.status
-                );
-
-                try {
-
-                    console.error(
-                        Buffer
-                            .from(error.response.data)
-                            .toString()
-                    );
-
-                } catch (e) {
-                    console.error("Unable to parse AI error");
-                }
-            }
-
-            // --------------------------------
-            // TIMEOUT
-            // --------------------------------
 
             if (error.code === "ECONNABORTED") {
 
@@ -331,10 +383,6 @@ app.post(
                 });
             }
 
-            // --------------------------------
-            // DEFAULT ERROR
-            // --------------------------------
-
             return res.status(500).json({
                 success: false,
                 error: "Failed to process image"
@@ -343,70 +391,92 @@ app.post(
     }
 );
 
-
 // ----------------------------------------------------
-// HISTORY / LEADS API
+// HISTORY API
 // ----------------------------------------------------
-
-function getLocalIpAddress() {
-    const interfaces = os.networkInterfaces();
-    for (const name of Object.keys(interfaces)) {
-        for (const iface of interfaces[name]) {
-            if (iface.family === "IPv4" && !iface.internal) {
-                return iface.address;
-            }
-        }
-    }
-    return "localhost";
-}
 
 app.get("/api/history", (req, res) => {
+
     try {
-        const csvPath = path.join(outputsDir, "leads.csv");
+
+        const csvPath =
+            path.join(outputsDir, "leads.csv");
+
         if (!fs.existsSync(csvPath)) {
-            return res.json({ success: true, history: [], localIp: getLocalIpAddress() });
+
+            return res.json({
+                success: true,
+                history: [],
+                localIp: getLocalIpAddress()
+            });
         }
-        
-        const data = fs.readFileSync(csvPath, "utf8");
-        const lines = data.trim().split("\n");
+
+        const data =
+            fs.readFileSync(csvPath, "utf8");
+
+        const lines =
+            data.trim().split("\n");
+
         if (lines.length <= 1) {
-            return res.json({ success: true, history: [], localIp: getLocalIpAddress() });
+
+            return res.json({
+                success: true,
+                history: [],
+                localIp: getLocalIpAddress()
+            });
         }
-        
+
         const history = [];
-        // Skip header line
+
         for (let i = 1; i < lines.length; i++) {
+
             const line = lines[i];
-            // Match quoted elements in CSV: "Timestamp","Name","Company","Filename"
-            const matches = line.match(/"([^"]*)"/g);
+
+            const matches =
+                line.match(/"([^"]*)"/g);
+
             if (matches && matches.length >= 4) {
-                const timestampStr = matches[0].replace(/"/g, "");
-                const name = matches[1].replace(/"/g, "");
-                const company = matches[2].replace(/"/g, "");
-                const filename = matches[3].replace(/"/g, "");
-                const cloudinaryUrl = matches[4] ? matches[4].replace(/"/g, "") : "";
+
                 history.push({
-                    timestamp: timestampStr,
-                    name,
-                    company,
-                    filename,
-                    cloudinaryUrl
+                    timestamp:
+                        matches[0].replace(/"/g, ""),
+
+                    name:
+                        matches[1].replace(/"/g, ""),
+
+                    company:
+                        matches[2].replace(/"/g, ""),
+
+                    filename:
+                        matches[3].replace(/"/g, ""),
+
+                    cloudinaryUrl:
+                        matches[4]
+                            ? matches[4].replace(/"/g, "")
+                            : ""
                 });
             }
         }
-        
-        // Return reverse chronological order (newest first) with server local IP
-        return res.json({ 
-            success: true, 
-            history: history.reverse(), 
-            localIp: getLocalIpAddress() 
+
+        return res.json({
+            success: true,
+            history: history.reverse(),
+            localIp: getLocalIpAddress()
         });
+
     } catch (error) {
-        console.error("Error reading history leads:", error);
-        return res.status(500).json({ success: false, error: "Failed to read history leads" });
+
+        console.error(
+            "History API Error:",
+            error.message
+        );
+
+        return res.status(500).json({
+            success: false,
+            error: "Failed to read history"
+        });
     }
 });
-
 
 // ----------------------------------------------------
 // GLOBAL ERROR HANDLER
@@ -414,14 +484,18 @@ app.get("/api/history", (req, res) => {
 
 app.use((error, req, res, next) => {
 
-    console.error("GLOBAL ERROR:", error.message);
+    console.error(
+        "GLOBAL ERROR:",
+        error.message
+    );
 
     return res.status(500).json({
         success: false,
-        error: error.message || "Something went wrong"
+        error:
+            error.message ||
+            "Something went wrong"
     });
 });
-
 
 // ----------------------------------------------------
 // START SERVER
@@ -430,7 +504,14 @@ app.use((error, req, res, next) => {
 app.listen(PORT, () => {
 
     console.log("\n==================================");
+
     console.log(`SERVER RUNNING`);
-    console.log(`http://localhost:${PORT}`);
+
+    console.log(`PORT: ${PORT}`);
+
+    console.log(
+        `AI SERVICE: ${AI_SERVICE_URL}`
+    );
+
     console.log("==================================\n");
 });
